@@ -1,0 +1,745 @@
+---
+title: "Análisis de Minería de Datos - Detección de Estrés"
+author: "Isabel Cantero"
+output: html_document
+---
+
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(ggplot2)
+library(gridExtra)
+library(dplyr)
+library(tidyverse)
+library(reshape2)
+library(caret)
+library(factoextra)
+```
+
+# 1. Carga de Datos
+
+```{r}
+df <- read.csv("stress.csv")
+
+dim(df)
+str(df)
+head(df)
+summary(df)
+```
+
+# 2. Preprocesamiento de Datos
+```{r}
+# Convertir variables categóricas en factores
+categorical_vars <- c("Gender", "Occupation", "Marital_Status", "Smoking_Habit", "Meditation_Practice", "Exercise_Type", "Stress_Detection")
+df[categorical_vars] <- lapply(df[categorical_vars], as.factor)
+```
+
+```{r}
+# Eliminar las columnas de hora y la de Ocupación
+df <- df[, !names(df) %in% c("Wake_Up_Time", "Bed_Time", "Occupation")]
+```
+
+```{r}
+# Transformaciones
+#df$Meditation_Practice <- ifelse(tolower(df$Meditation_Practice) == "yes", 1, 0)
+#df$Smoking_Habit <- ifelse(tolower(df$Smoking_Habit) == "yes", 1, 0)
+
+df$Stress_Detection <- factor(
+  df$Stress_Detection,
+  levels = c("Low", "Medium", "High"),
+  ordered = TRUE
+)
+df$Stress_Detection_Numeric <- as.numeric(df$Stress_Detection)
+
+df$Smoking_Habit <- as.factor(df$Smoking_Habit)
+df$Meditation_Practice <- as.factor(df$Meditation_Practice)
+
+attach(df)
+```
+
+
+```{r}
+colSums(is.na(df))
+```
+Como no hay valores NAs, no hace falta eliminarlos.
+
+Outliers
+```{r}
+columnas_numericas <- c("Age", "Sleep_Duration", "Sleep_Quality", "Physical_Activity",
+                        "Screen_Time", "Caffeine_Intake", "Alcohol_Intake", 
+                        "Work_Hours", "Travel_Time", "Social_Interactions", 
+                        "Blood_Pressure", "Cholesterol_Level", "Blood_Sugar_Level")
+
+boxplot(Sleep_Duration, main = "Sleep_Duration")
+boxplot(Sleep_Quality, main = "Sleep_Quality")
+boxplot(Physical_Activity, main = "Physical_Activity") # no
+boxplot(Screen_Time, main = "Screen_Time")
+boxplot(Caffeine_Intake, main = "Caffeine_Intake")
+boxplot(Alcohol_Intake, main = "Alcohol_Intake") # no
+boxplot(Work_Hours, main = "Work_Hours")
+boxplot(Travel_Time, main = "Travel_Time") # no
+boxplot(Social_Interactions, main = "Social_Interactions")
+boxplot(Blood_Pressure, main = "Blood_Pressure") # no
+boxplot(Cholesterol_Level, main = "Cholesterol_Level")
+boxplot(Blood_Sugar_Level, main = "Blood_Sugar_Level")
+
+columnas_con_outliers <- c("Sleep_Duration", "Sleep_Quality", "Screen_Time", 
+                           "Caffeine_Intake", "Work_Hours", "Social_Interactions", 
+                        "Cholesterol_Level", "Blood_Sugar_Level")
+
+eliminar_outliers_pct <- function(df, columna, porcentaje = 0.05) {
+  p_inf <- porcentaje / 2
+  p_sup <- 1 - p_inf
+  limites <- quantile(df[[columna]], probs = c(p_inf, p_sup), na.rm = TRUE)
+  
+  df_filtrado <- df[df[[columna]] >= limites[1] & df[[columna]] <= limites[2], ]
+  return(df_filtrado)
+}
+
+for (col in columnas_con_outliers) {
+  df <- eliminar_outliers_pct(df, col, porcentaje = 0.05)
+}
+```
+
+---
+
+# 3. Exploración y análisis descriptivo del conjunto de datos
+
+```{r}
+stress_colors <- c("Low" = "#7FC8A9","Medium" = "#F2D388", "High" = "#DE6B6B")
+```
+
+## 3.1. Distribución de los Niveles de Estrés
+```{r}
+ggplot(df, aes(x = Stress_Detection)) +
+  geom_bar(aes(fill = Stress_Detection)) +
+  geom_text(stat = "count", aes(label = after_stat(count)), vjust = -0.5, size = 4) +
+  scale_fill_manual(values = stress_colors) +
+  labs(title = "Distribución de los Niveles de Estrés",
+       x = "Nivel de Estrés",
+       y = "Frecuencia") +
+  theme_minimal()
+```
+
+## 3.2. Distribuciones de los Niveles de Estrés de cada variable según tipo
+### 3.2.1. Gráficos de Bienestar
+```{r}
+wellbeing_vars <- c("Age", "Sleep_Duration", "Sleep_Quality", "Caffeine_Intake", "Alcohol_Intake", "Blood_Pressure", "Cholesterol_Level", "Blood_Sugar_Level")
+
+# Gráficos para las variables de bienestar o salud (variables numéricas)
+wellbeing_plots <- list()
+
+titles <- c("Edad", "Duración del Sueño", "Calidad del Sueño", "Consumo de Cafeína", "Consumo de Alcohol", "Presión Arterial", "Nivel de Colesterol", "Nivel de Azúcar en Sangre")
+
+for (i in 1:length(wellbeing_vars)) {
+  var <- wellbeing_vars[i]
+  p <- ggplot(df, aes_string(x = "Stress_Detection", y = var, fill = "Stress_Detection")) +
+    geom_boxplot() +
+    scale_fill_manual(values = stress_colors) +
+    labs(title = paste("Distribución de", titles[i], "por nivel de estrés"), 
+         x = "Nivel de Estrés", y = titles[i]) +
+    theme_minimal() +
+    theme(legend.position = "none")
+  wellbeing_plots[[var]] <- p
+}
+```
+
+### 3.2.2. Gráficos de Estilo de Vida
+```{r}
+lifestyle_vars <- c("Work_Hours", "Screen_Time", "Social_Interactions", "Travel_Time", 
+                    "Meditation_Practice", "Smoking_Habit", "Exercise_Type")
+
+lifestyle_plots <- list()
+
+lifestyle_titles <- c("Horas de Trabajo", "Tiempo en Pantalla", "Interacciones Sociales", "Tiempo de Viaje", 
+                      "Práctica de Meditación", "Hábito de Fumar", "Tipo de Ejercicio")
+
+for (i in 1:length(lifestyle_vars)) {
+  var <- lifestyle_vars[i]
+  if (var %in% c("Work_Hours", "Screen_Time", "Social_Interactions", "Travel_Time")) {
+    p <- ggplot(df, aes_string(x = "Stress_Detection", y = var, fill = "Stress_Detection")) +
+      geom_boxplot() +
+      scale_fill_manual(values = stress_colors) +
+      labs(title = paste("Distribución de", lifestyle_titles[i], "por nivel de estrés"), 
+           x = "Nivel de Estrés", y = lifestyle_titles[i]) +
+      theme_minimal() +
+      theme(legend.position = "none")
+    lifestyle_plots[[var]] <- p
+  } else {
+    p <- ggplot(df, aes_string(x = var, fill = "Stress_Detection")) +
+      geom_bar(position = "fill") +
+      scale_fill_manual(values = stress_colors) +
+      labs(title = paste("Distribución de", lifestyle_titles[i], "por nivel de estrés"), 
+           x = lifestyle_titles[i], y = "Proporción") +
+      theme_minimal() +
+      theme(legend.position = "none")
+    lifestyle_plots[[var]] <- p
+  }
+}
+```
+
+
+### 3.2.3. Gráficos de Variables Demográficas
+```{r}
+# Variables demográficas (categóricas)
+demographic_vars <- c("Gender", "Marital_Status")
+
+demographic_plots <- list()
+
+demographic_titles <- c("Género", "Estado Civil")
+
+for (i in 1:length(demographic_vars)) {
+  var <- demographic_vars[i]
+  p <- ggplot(df, aes_string(x = var, fill = "Stress_Detection")) +
+    geom_bar(position = "fill") +
+    scale_fill_manual(values = stress_colors) +
+    labs(title = paste("Distribución de", demographic_titles[i], "por nivel de estrés"), 
+         x = demographic_titles[i], y = "Proporción") +
+    theme_minimal() +
+    theme(legend.position = "none")
+  demographic_plots[[var]] <- p
+}
+```
+
+```{r}
+# Organizar los gráficos en grids
+# 1. Variables de bienestar o salud
+wellbeing_grid <- grid.arrange(grobs = wellbeing_plots, ncol = 3)
+
+# 2. Variables de actividad y estilo de vida
+lifestyle_grid <- grid.arrange(grobs = lifestyle_plots, ncol = 3)
+
+# 3. Variables demográficas
+demographic_grid <- grid.arrange(grobs = demographic_plots, ncol = 2)
+```
+
+## 3.3. Distribución de Edad según Nivel de Estrés
+```{r}
+ggplot(df, aes(x = Age, fill = Stress_Detection)) +
+  geom_histogram(binwidth = 5, color = "white") +
+  scale_fill_manual(values = stress_colors) +
+  labs(title = "Distribución de Edad según Nivel de Estrés",
+       x = "Edad", y = "Frecuencia") +
+  theme_minimal()
+```
+
+## 3.4. Horas de sueño y nivel de estrés
+```{r}
+ggplot(df, aes(x = Sleep_Duration, fill = Stress_Detection)) +
+  geom_density(alpha = 0.6, color = NA) +
+  scale_fill_manual(values = stress_colors) +
+  labs(
+    title = "Distribución de Horas de Sueño según Nivel de Estrés",
+    subtitle = "Comparación de densidades entre niveles de estrés",
+    x = "Horas de Sueño",
+    y = "Densidad",
+    fill = "Nivel de Estrés"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
+    plot.subtitle = element_text(hjust = 0.5, size = 12),
+    axis.title = element_text(face = "bold"),
+    legend.position = "top",
+    legend.title = element_text(face = "bold")
+  )
+```
+
+## 3.5. Relación entre el Tiempo de pantalla y el nivel de estrés
+```{r}
+ggplot(df, aes(x = Screen_Time, y = Stress_Detection_Numeric)) +
+  geom_point(aes(color = Stress_Detection), alpha = 0.7, size = 3) +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +  # Ajuste de la línea de regresión
+  scale_color_manual(values = stress_colors) +
+  labs(
+    title = "Relación entre el Tiempo de Pantalla y el Nivel de Estrés",
+    x = "Tiempo de Pantalla (Horas)",
+    y = "Nivel de Estrés (Escala Numérica)",
+    caption = "Línea de regresión para mostrar tendencia"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "top")
+
+```
+
+## 3.6. Impacto del Consumo de Alcohol en el Nivel de Estrés
+```{r}
+ggplot(df, aes(x = Alcohol_Intake, fill = Stress_Detection)) +
+  geom_bar(position = "fill", stat = "count") +
+  scale_fill_manual(values = stress_colors) +
+  labs(title = "Relación entre Consumo de Alcohol y Nivel de Estrés",
+       x = "Consumo de Alcohol (porciones por semana)", y = "Proporción de Estrés") +
+  theme_minimal() +
+  theme(legend.position = "top")
+```
+
+## 3.7. Distribución del Nivel de Estrés por Hábito de Fumar
+```{r}
+ggplot(df, aes(x = Smoking_Habit, fill = Stress_Detection)) +
+  geom_bar(position = "fill") +
+  scale_fill_manual(values = stress_colors) +
+  labs(
+    title = "Distribución del Nivel de Estrés por Hábito de Fumar",
+    x = "Hábito de Fumar",
+    y = "Proporción de Niveles de Estrés"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "top")
+```
+
+## 3.8. Comparación de Nivel de Estrés por Estado Civil
+```{r}
+ggplot(df, aes(x = Marital_Status, fill = Stress_Detection)) +
+  geom_bar(position = "fill") +
+  scale_fill_manual(values = stress_colors) +
+  labs(title = "Distribución del Nivel de Estrés según Estado Civil",
+       x = "Estado Civil", y = "Proporción") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+## 3.9. Relación entre las horas de trabajo y el estrés
+```{r}
+ggplot(df, aes(x = Work_Hours, y = Stress_Detection_Numeric)) +
+  geom_point(aes(color = Stress_Detection), alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  scale_color_manual(values = stress_colors) +
+  labs(
+    title = "Relación entre Horas de Trabajo y Nivel de Estrés",
+    x = "Horas de Trabajo",
+    y = "Nivel de Estrés (Escala Numérica)"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "top")
+```
+
+## 3.10. Relación entre indicadores de salud física y estrés
+```{r}
+regression_plots <- list()
+
+# Gráfico para Blood Pressure
+p1 <- ggplot(df, aes(x = Blood_Pressure, y = Stress_Detection_Numeric)) +
+  geom_point(aes(color = Stress_Detection), alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE, color = "black") +
+  scale_color_manual(values = stress_colors) +
+  labs(title = "Relación entre Presión Arterial y Nivel de Estrés",
+       x = "Presión Arterial", y = "Nivel de Estrés") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+# Gráfico para Cholesterol Level
+p2 <- ggplot(df, aes(x = Cholesterol_Level, y = Stress_Detection_Numeric)) +
+  geom_point(aes(color = Stress_Detection), alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE, color = "black") +
+  scale_color_manual(values = stress_colors) +
+  labs(title = "Relación entre Nivel de Colesterol y Nivel de Estrés",
+       x = "Nivel de Colesterol", y = "Nivel de Estrés") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+# Gráfico para Blood Sugar Level
+p3 <- ggplot(df, aes(x = Blood_Sugar_Level, y = Stress_Detection_Numeric)) +
+  geom_point(aes(color = Stress_Detection), alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE, color = "black") +
+  scale_color_manual(values = stress_colors) +
+  labs(title = "Relación entre Nivel de Azúcar en Sangre y Nivel de Estrés",
+       x = "Nivel de Azúcar en Sangre", y = "Nivel de Estrés") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+# Agregar los gráficos a la lista
+regression_plots[["Blood_Pressure"]] <- p1
+regression_plots[["Cholesterol_Level"]] <- p2
+regression_plots[["Blood_Sugar_Level"]] <- p3
+
+# Organizar los gráficos en un grid de 3 filas
+grid.arrange(grobs = regression_plots, ncol = 1)
+```
+
+
+## 3.11. Mapa de correlación entre variables numéricas
+```{r}
+numeric_df <- df %>%
+  select(Age, Sleep_Duration, Sleep_Quality, Physical_Activity, 
+         Screen_Time, Work_Hours, Travel_Time, Social_Interactions,
+         Blood_Pressure, Cholesterol_Level, Blood_Sugar_Level)
+
+cor_matrix <- round(cor(numeric_df, use = "complete.obs"), 2)
+melted_cor <- melt(cor_matrix)
+
+ggplot(melted_cor, aes(Var1, Var2, fill = value)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0,
+                       name = "Correlación") +
+  geom_text(aes(label = value), size = 3) +
+  theme_minimal() +
+  labs(title = "Mapa de Correlación de Variables Numéricas",
+       x = "", y = "") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 3.12. Influencia del Género y Estado Civil en los Niveles de Estrés
+
+```{r}
+df$Genero_Estado <- interaction(df$Gender, df$Marital_Status, sep = "_")
+
+df %>%
+  group_by(Genero_Estado) %>%
+  summarise(Promedio_Estres = mean(Stress_Detection_Numeric)) %>%
+  ggplot(aes(x = reorder(Genero_Estado, Promedio_Estres), 
+             y = Promedio_Estres, fill = Genero_Estado)) +
+  geom_col() +
+  geom_text(aes(label = round(Promedio_Estres, 2)), 
+            hjust = -0.1, size = 3.5) +
+  coord_flip() +
+  labs(title = "Promedio de estrés por género y estado civil",
+       x = "Género y estado civil",
+       y = "Estrés promedio") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+---
+
+# 4. Modelado Predictivo (Aprendizaje Supervisado)
+## 4.1. Partición de datos
+
+```{r}
+# Semilla para reproducibilidad
+set.seed(123)
+
+# Crear índices para la partición (80% entrenamiento, 20% prueba)
+train_index <- createDataPartition(df$Stress_Detection, p = 0.8, list = FALSE)
+
+# Crear conjuntos de entrenamiento y prueba
+train_data <- df[train_index, ]
+test_data <- df[-train_index, ]
+
+# Verificar proporciones
+prop.table(table(train_data$Stress_Detection))
+prop.table(table(test_data$Stress_Detection))
+```
+
+## 4.2. Preprocesamiento Eficiente
+```{r}
+library(recipes)
+
+# Crear receta de preprocesamiento
+recipe_spec <- recipe(Stress_Detection ~ ., data = train_data) %>%
+  step_rm(Stress_Detection_Numeric) %>%  # Eliminar la versión numérica
+  step_normalize(all_numeric()) %>%      # Estandarizar variables numéricas
+  step_dummy(all_nominal(), -all_outcomes()) %>%  # Convertir categóricas a dummy
+  step_zv(all_predictors())              # Eliminar predictores con varianza cero
+
+# Preparar la receta (calcula los parámetros de transformación)
+prepped_recipe <- prep(recipe_spec, training = train_data)
+
+# Aplicar a los conjuntos de entrenamiento y prueba
+train_processed <- bake(prepped_recipe, new_data = train_data)
+test_processed <- bake(prepped_recipe, new_data = test_data)
+```
+
+
+## 4.3. Random Forest
+```{r}
+# Configurar control de entrenamiento
+ctrl_rf <- trainControl(method = "cv", number = 3, verboseIter = FALSE)
+
+# Grid de parámetros reducido
+rf_grid <- expand.grid(
+  mtry = c(3, 5, 7),
+  splitrule = "gini",
+  min.node.size = c(5, 10)  # Nodos más grandes para árboles más pequeños
+)
+
+# Entrenar modelo con menos árboles
+rf_model <- train(
+  Stress_Detection ~ .,
+  data = train_processed,
+  method = "ranger",
+  trControl = ctrl_rf,
+  tuneGrid = rf_grid,
+  num.trees = 100,
+  importance = "permutation"  # Para obtener importancia de variables
+)
+
+# Evaluación
+rf_pred <- predict(rf_model, newdata = test_processed)
+confusionMatrix(rf_pred, test_processed$Stress_Detection)
+
+# Importancia de variables
+var_imp_rf <- varImp(rf_model)
+plot(var_imp_rf, main = "Importancia de Variables - Random Forest")
+```
+
+---
+
+# 5. Análisis No Supervisado con K-means y PCA
+## 5.1. Normalización de los Datos Numéricos
+Primero, estandarizamos las variables numéricas para que todas estén en la misma escala (media = 0, desviación estándar = 1). Esto es necesario porque variables como "Age" y "Cholesterol_Level" están en rangos muy diferentes.
+
+```{r}
+df_numeric <- df %>% select_if(is.numeric)
+unsupervised_data <- scale(df_numeric)
+```
+
+## 5.2. Análisis de Componentes Principales (PCA)
+Este método reduce la cantidad de variables y nos permite visualizar los datos en 2D.
+```{r}
+pca <- prcomp(unsupervised_data, center = TRUE, scale. = TRUE)
+fviz_eig(pca, addlabels = TRUE, ylim = c(0, 50), main = "Varianza Explicada por Componentes Principales")
+
+
+fviz_pca_var(pca, col.var = "contrib",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE) +
+  labs(title = "PCA - Contribución de Variables")
+```
+
+**Interpretación:**
+Las primeras 2 o 3 componentes principales explican una buena parte de la variabilidad de los datos.
+
+Esto nos da permiso de hacer gráficas bidimensionales sin perder demasiada información.
+
+## 5.3. K-means Clustering
+Primero, buscamos cuántos clusters (grupos) tiene sentido crear:
+```{r}
+fviz_nbclust(unsupervised_data, kmeans, method = "wss")
+```
+
+**Interpretación:**
+El “codo” en la curva indica el número óptimo de clusters. COmo el codo está en 3, usaremos 3 clusters.
+
+```{r}
+set.seed(123)
+kmeans_result <- kmeans(unsupervised_data, centers = 3, nstart = 25)
+df$cluster <- as.factor(kmeans_result$cluster)
+```
+
+Ahora los visualizamos en 2D con PCA:
+```{r}
+fviz_cluster(kmeans_result, data = unsupervised_data,
+             geom = "point", ellipse.type = "norm", 
+             palette = "jco", ggtheme = theme_minimal())
+```
+
+## 5.4. Comparación Clusters vs Nivel de Estrés
+
+```{r}
+ggplot(df, aes(x = cluster, fill = Stress_Detection)) +
+  geom_bar(position = "fill") +
+  labs(title = "Distribución de niveles de estrés por cluster",
+       y = "Proporción", x = "Cluster") +
+  scale_fill_brewer(palette = "Set1")
+```
+
+**Interpretación:**
+Este gráfico muestra qué proporción de niveles de estrés (bajo, medio, alto) hay en cada grupo formado por el clustering.
+
+Por ejemplo, el Cluster 1 tiene muchas personas con estrés alto, y el Cluster 2 tiene muchas personas con estrés medio y bajo, lo cual puede ayudarnos a averiguar cual de las variables influye más. Para ello:
+
+```{r}
+# Cálculo del promedio por cluster de variables numéricas
+df %>%
+  group_by(cluster) %>%
+  summarise(across(where(is.numeric), mean, na.rm = TRUE))
+```
+
+
+```{r}
+# Proporciones por cluster para variables categóricas
+categorical_vars <- c("Gender", "Marital_Status", "Smoking_Habit", "Meditation_Practice", "Exercise_Type")
+
+for (var in categorical_vars) {
+  print(var)
+  print(prop.table(table(df[[var]], df$cluster), margin = 2))
+}
+```
+
+
+## 5.5. Conclusiones
+Se realizó un análisis de clustering usando K-means, obteniendo 3 grupos (clusters). Al analizar el promedio de las variables y la distribución de los niveles de estrés, se encontró lo siguiente:
+
+### 5.5.1 Cluster 1: Alto Estrés (más estresado)
+
+**Características destacadas:**
+- Edad: mayor (promedio ~43 años)
+- Menor duración del sueño: 5.96 h
+- Mayor tiempo frente a pantallas: 4.74 h
+- Más actividad física (curioso): 3.64
+- Más alcohol: 1.41
+- Más presión arterial: 151
+- Más colesterol: 237
+- Más azúcar en sangre: 122.5
+- Tiempo de viaje mayor: 3.86 h
+
+**Perfil socio-demográfico:**
+- Más hombres (66%)
+- Mayoría casados
+- Alta proporción de fumadores (73%)
+- Sí practican meditación (78%) (curioso)
+- Más enfocados en ejercicios como cardio (40%) y fuerza (36%)
+
+**Conclusión:**
+Este grupo parece compuesto por personas mayores, con hábitos menos saludables en sueño y consumo de alcohol/tabaco. Aunque hacen ejercicio, eso no compensa factores de riesgo como el colesterol, la presión arterial y el tiempo frente a pantallas. Predominan los hombres y personas casadas. Es el grupo con más estrés reportado (2.65 en escala 1–3).
+
+### 5.5.2. Cluster 2: Bajo Estrés (el más relajado)
+
+**Características destacadas:**
+- Edad más baja: ~33 años
+- Sueño aceptable: 6.2 h
+- Menos pantalla: 3.5 h
+- Menos alcohol y tabaco
+- Menor presión arterial, colesterol y azúcar
+- Tiempo de viaje menor
+
+**Perfil socio-demográfico:**
+- Mayoría mujeres (73%)
+- Principalmente solteras
+- Fuman poco (36%)
+- No meditan en su mayoría (64%)
+- Hacen más yoga y pilates
+
+**Conclusión:**
+Este grupo representa un perfil más joven y saludable, con mejores hábitos y menor exposición al estrés. Destaca por menor consumo de sustancias, más sueño, y una vida menos sedentaria. Es el grupo con menos estrés percibido (1.78).
+
+---
+
+# 6. Contraste de hipótesis (estadística)
+## 6.1. Fumar y Calidad del Sueño
+**Hipótesis:**
+
+- H₀: No hay diferencia en la calidad del sueño entre fumadores y no fumadores.
+- H₁: Hay una diferencia en la calidad del sueño entre fumadores y no fumadores.
+
+**Test estadístico (Wilcoxon):**
+```{r}
+# Test de normalidad
+shapiro.test(Sleep_Quality)
+# no sigue una distribución normal
+
+# Wilcoxon test
+wilcox.test(Sleep_Quality ~ Smoking_Habit, data = df)
+```
+**Interpetación:**
+El p-valor es mayor a 0.05, por lo que no se rechaza la hipótesis nula. No se encontró evidencia estadísticamente significativa de que haya una diferencia en la calidad del sueño entre personas fumadoras y no fumadoras.
+
+**Visualización:**
+```{r}
+ggplot(df, aes(x = Smoking_Habit, y = Sleep_Quality, fill = Smoking_Habit)) +
+  geom_boxplot() +
+  labs(title = "Calidad del sueño según hábito de fumar",
+       x = "¿Fuma?", y = "Calidad del sueño") +
+  theme_minimal()
+
+```
+
+---
+
+## 6.2. Meditación y Calidad del Sueño
+**Hipótesis:**
+
+- H₀: No hay diferencia en la calidad del sueño entre quienes meditan y quienes no.
+- H₁: Quienes meditan tienen diferente calidad del sueño.
+
+**Test estadístico (t-test):**
+```{r}
+# t-test
+t.test(Sleep_Quality ~ Meditation_Practice, data = df)
+```
+**Interpretación:**
+El p-valor es muy pequeño (p < 0.001), por lo que se rechaza la hipótesis nula. Hay evidencia estadística de que **practicar meditación está asociado a una mejor calidad del sueño.**
+
+**Visualización:**
+```{r}
+ggplot(df, aes(x = Meditation_Practice, y = Sleep_Quality, fill = Meditation_Practice)) +
+  geom_boxplot() +
+  labs(title = "Calidad del sueño según práctica de meditación",
+       x = "¿Medita?", y = "Calidad del sueño") +
+  theme_minimal()
+```
+
+---
+
+## 6.3. Calidad del Sueño y Consumo de Cafeína
+
+**Hipótesis:**
+
+- H₀: No hay diferencia en la calidad del sueño según el nivel de cafeína consumido.
+- H₁: Hay diferencia en la calidad del sueño según el nivel de cafeína consumido.
+
+**Test estadístico (ANOVA):**
+```{r}
+df$Caffeine_Intake <- as.factor(df$Caffeine_Intake)
+
+anova_caffeine_sleep <- aov(Sleep_Quality ~ Caffeine_Intake, data = df)
+summary(anova_caffeine_sleep)
+```
+**Interpretación:**
+El p-valor es 0.163 (> 0.05), por lo que **no hay evidencia suficiente para rechazar** la hipótesis nula. El consumo de cafeína no parece estar significativamente asociado a la calidad del sueño.
+
+**Visualización:**
+```{r}
+ggplot(df, aes(x = as.factor(Caffeine_Intake), y = Sleep_Quality)) +
+  geom_boxplot(fill = "skyblue") +
+  labs(title = "Calidad del Sueño según Consumo de Cafeína",
+       x = "Café / día", y = "Calidad del Sueño") +
+  theme_minimal()
+```
+
+---
+
+## 6.4. Horas de Trabajo y Actividad Física
+
+**Hipótesis:**
+
+- H₀: No hay correlación entre horas de trabajo y actividad física.
+- H₁: Existe correlación entre horas de trabajo y actividad física.
+
+**Test estadístico (correlación de Pearson):**
+
+```{r}
+cor.test(df$Work_Hours, df$Physical_Activity, method = "pearson")
+```
+
+**Interpretación:**
+El p-valor es 0.0006, lo que indica una **correlación estadísticamente significativa**, aunque de magnitud baja (r = 0.12) entre las horas de trabajo y la actividad física.
+
+**Visualización:**
+
+```{r}
+ggplot(df, aes(x = Work_Hours, y = Physical_Activity)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  labs(title = "Relación entre Horas de Trabajo y Actividad Física",
+       x = "Horas de Trabajo", y = "Actividad Física") +
+  theme_minimal()
+```
+
+---
+
+## 6.5. Azúcar en Sangre y Colesterol
+
+**Hipótesis:**
+
+- H₀: No hay correlación entre el nivel de azúcar en sangre y colesterol.
+- H₁: Existe correlación entre el nivel de azúcar en sangre y colesterol.
+
+**Test estadístico (correlación de Pearson):**
+
+```{r}
+cor.test(df$Blood_Sugar_Level, df$Cholesterol_Level, method = "pearson")
+```
+
+**Interpretación:**
+La correlación es **muy fuerte y altamente significativa** (r = 0.94, p < 0.001). Hay una relación directa clara entre el nivel de azúcar en sangre y colesterol.
+
+**Visualización:**
+```{r}
+ggplot(df, aes(x = Blood_Sugar_Level, y = Cholesterol_Level)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", se = FALSE, color = "darkgreen") +
+  labs(title = "Relación entre Azúcar en Sangre y Colesterol",
+       x = "Nivel de Azúcar en Sangre", y = "Colesterol") +
+  theme_minimal()
+```

@@ -4,9 +4,7 @@ author: "Isabel Cantero"
 output: html_document
 ---
 
-```{r setup}
-knitr::opts_chunk$set(echo = TRUE)
-
+```{r setup, warning=FALSE}
 library(ggplot2)
 library(gridExtra)
 library(dplyr)
@@ -536,7 +534,7 @@ ggplot(df, aes(x = cluster, fill = Stress_Detection)) +
 **Interpretación:**
 Este gráfico muestra qué proporción de niveles de estrés (bajo, medio, alto) hay en cada grupo formado por el clustering.
 
-Por ejemplo, el Cluster 1 tiene muchas personas con estrés alto, y el Cluster 2 tiene muchas personas con estrés medio y bajo, lo cual puede ayudarnos a averiguar cual de las variables influye más. Para ello:
+Por ejemplo, el Cluster 2 tiene muchas personas con estrés alto, y el Cluster 1 tiene muchas personas con estrés medio y bajo, lo cual puede ayudarnos a averiguar cual de las variables influye más. Para ello:
 
 ```{r}
 # Cálculo del promedio por cluster de variables numéricas
@@ -560,7 +558,7 @@ for (var in categorical_vars) {
 ## 5.5. Conclusiones
 Se realizó un análisis de clustering usando K-means, obteniendo 3 grupos (clusters). Al analizar el promedio de las variables y la distribución de los niveles de estrés, se encontró lo siguiente:
 
-### 5.5.1 Cluster 1: Alto Estrés (más estresado)
+### 5.5.1 Cluster 2: Alto Estrés (más estresado)
 
 **Características destacadas:**
 - Edad: mayor (promedio ~43 años)
@@ -583,7 +581,7 @@ Se realizó un análisis de clustering usando K-means, obteniendo 3 grupos (clus
 **Conclusión:**
 Este grupo parece compuesto por personas mayores, con hábitos menos saludables en sueño y consumo de alcohol/tabaco. Aunque hacen ejercicio, eso no compensa factores de riesgo como el colesterol, la presión arterial y el tiempo frente a pantallas. Predominan los hombres y personas casadas. Es el grupo con más estrés reportado (2.65 en escala 1–3).
 
-### 5.5.2. Cluster 2: Bajo Estrés (el más relajado)
+### 5.5.2. Cluster 1: Bajo Estrés (el más relajado)
 
 **Características destacadas:**
 - Edad más baja: ~33 años
@@ -621,7 +619,7 @@ shapiro.test(Sleep_Quality)
 # Wilcoxon test
 wilcox.test(Sleep_Quality ~ Smoking_Habit, data = df)
 ```
-**Interpetación:**
+**Interpretación:**
 El p-valor es mayor a 0.05, por lo que no se rechaza la hipótesis nula. No se encontró evidencia estadísticamente significativa de que haya una diferencia en la calidad del sueño entre personas fumadoras y no fumadoras.
 
 **Visualización:**
@@ -661,35 +659,7 @@ ggplot(df, aes(x = Meditation_Practice, y = Sleep_Quality, fill = Meditation_Pra
 
 ---
 
-## 6.3. Calidad del Sueño y Consumo de Cafeína
-
-**Hipótesis:**
-
-- H₀: No hay diferencia en la calidad del sueño según el nivel de cafeína consumido.
-- H₁: Hay diferencia en la calidad del sueño según el nivel de cafeína consumido.
-
-**Test estadístico (ANOVA):**
-```{r}
-df$Caffeine_Intake <- as.factor(df$Caffeine_Intake)
-
-anova_caffeine_sleep <- aov(Sleep_Quality ~ Caffeine_Intake, data = df)
-summary(anova_caffeine_sleep)
-```
-**Interpretación:**
-El p-valor es 0.163 (> 0.05), por lo que **no hay evidencia suficiente para rechazar** la hipótesis nula. El consumo de cafeína no parece estar significativamente asociado a la calidad del sueño.
-
-**Visualización:**
-```{r}
-ggplot(df, aes(x = as.factor(Caffeine_Intake), y = Sleep_Quality)) +
-  geom_boxplot(fill = "skyblue") +
-  labs(title = "Calidad del Sueño según Consumo de Cafeína",
-       x = "Café / día", y = "Calidad del Sueño") +
-  theme_minimal()
-```
-
----
-
-## 6.4. Horas de Trabajo y Actividad Física
+## 6.3. Horas de Trabajo y Actividad Física
 
 **Hipótesis:**
 
@@ -703,7 +673,7 @@ cor.test(df$Work_Hours, df$Physical_Activity, method = "pearson")
 ```
 
 **Interpretación:**
-El p-valor es 0.0006, lo que indica una **correlación estadísticamente significativa**, aunque de magnitud baja (r = 0.12) entre las horas de trabajo y la actividad física.
+El p-valor es mayor que 0.05, lo que indica que **no hay evidencia suficiente para rechazar la hipótesis nula**. No se encontró una correlación estadísticamente significativa entre las horas de trabajo y la actividad física.
 
 **Visualización:**
 
@@ -718,7 +688,7 @@ ggplot(df, aes(x = Work_Hours, y = Physical_Activity)) +
 
 ---
 
-## 6.5. Azúcar en Sangre y Colesterol
+## 6.4. Azúcar en Sangre y Colesterol
 
 **Hipótesis:**
 

@@ -1,0 +1,282 @@
+# 1. Set-up y carga de datos
+
+Se realiza la configuración inicial del entorno de trabajo y se carga el conjunto de datos a analizar. A continuación, se describe el proceso:
+
+- El archivo `milknew.csv` es cargado en R mediante la función `read.csv()`. Este archivo contiene los datos que serán utilizados para el análisis.
+- Se verifica la dimensión del conjunto de datos utilizando la función `dim()` para confirmar el número de filas y columnas.
+- Finalmente, se cargan las bibliotecas necesarias para el análisis exploratorio y visualización de datos: `tidyverse`, `skimr`, `ggplot2` y `corrplot`.
+
+Cabe destacar que hay que instalar los paquetes con `install.packages(pkgs)` si no están previamente descargados en el dispositivo a usar.
+
+```{r}
+milknew <- read.csv("milknew.csv")
+dim(milknew)
+library(tidyverse)
+library(skimr)
+library(ggplot2)
+library(corrplot)
+library(patchwork)
+library(caret)
+library(nnet)
+library(rpart)
+library(rpart.plot)
+library(ggplot2)
+library(randomForest)
+library(class)
+```
+
+# 2. Preprocesamiento de datos
+
+A continuación, se realiza el preprocesamiento de los datos para prepararlos adecuadamente antes del análisis. Los pasos incluyen:
+
+- Se utiliza la función `head()` para visualizar las primeras filas del conjunto de datos y obtener una idea general de su estructura.
+- Se verifica la presencia de valores faltantes en cada columna utilizando `colSums(is.na(milknew))`. En este caso, no se detectan valores faltantes, por lo que no es necesario implementar técnicas de imputación.
+- Se elimina la columna `Colour` del conjunto de datos, ya que no será utilizada en el análisis. Esto se realiza mediante la función `select()` del paquete `dplyr`.
+- La variable `Grade`, originalmente categórica con niveles "low", "medium" y "high", se transforma en una variable numérica ordinal. Esto se logra convirtiendo los niveles en factores ordenados y posteriormente en valores numéricos (0, 1, 2).
+
+```{r}
+head(milknew)
+
+colSums(is.na(milknew))
+
+data_clean <- milknew %>%
+  select(-Colour)
+data_clean$Grade <- as.integer(factor(data_clean$Grade, levels = c("low", "medium", "high"), ordered = TRUE)) - 1
+data_clean$Grade <- as.integer(data_clean$Grade)
+
+data_clean
+```
+
+# 3. Exploración de Datos
+
+En esta sección, realizamos un análisis exploratorio de los datos para comprender mejor las relaciones entre las variables y su distribución. A continuación, se describen los pasos realizados:
+
+## 3.1 Resumen Estadístico
+Generamos un resumen estadístico de las variables numéricas utilizando la función `summary()`. Esto proporciona información sobre la media, mediana, mínimo, máximo y otros estadísticos descriptivos.
+
+```{r}
+# Resumen estadístico de variables numéricas
+summary(data_clean)
+```
+
+## 3.2 Distribución de `Grade`
+
+Visualizamos la distribución de la variable `Grade` (0 = low, 1 = medium, 2 = high) mediante gráficos de barras y un gráfico circular. Estos gráficos nos permiten entender cómo están distribuidas las categorías de calidad del producto lácteo en el dataset.
+
+El gráfico de barras muestra la frecuencia de cada categoría de `Grade`.
+
+```{r}
+ggplot(data_clean, aes(x = as.factor(Grade))) +
+  geom_bar(fill = "darkslateblue") +
+  labs(title = "Distribución de Grade", 
+       x = "Grade (0 = low, 1 = medium, 2 = high)", 
+       y = "Frecuencia") +
+  theme_minimal()
+```
+
+## 3.3 Correlaciones entre Variables Numéricas
+
+Para comprender mejor las relaciones lineales entre las variables numéricas del dataset, calculamos y visualizamos la matriz de correlaciones. Esto nos permite identificar qué variables están más relacionadas entre sí y cómo se relacionan con `Grade`.
+
+La matriz de correlaciones muestra los coeficientes de correlación de Pearson entre cada par de variables. Un valor cercano a 1 indica una fuerte correlación positiva, mientras que un valor cercano a -1 indica una fuerte correlación negativa. Los valores cercanos a 0 indican poca o ninguna relación lineal. El plotde estos datos se desglosa en el apartado "3.8 Heatmap de Correlaciones"
+
+```{r}
+cor_matrix <- cor(data_clean %>% select(where(is.numeric)))
+round(cor_matrix, 2)
+```
+
+## 3.4 Distribución de Variables Numéricas por `Grade`
+
+Para comprender mejor cómo se comportan las variables numéricas en función de los niveles de `Grade` (0 = low, 1 = medium, 2 = high), realizamos un análisis visual utilizando histogramas y diagramas de densidad. Estos gráficos nos permiten identificar patrones o diferencias significativas entre las categorías de calidad del producto lácteo.
+
+Los histogramas muestran la distribución de cada variable numérica (`pH`, `Temprature`, `Taste`, etc.) segmentada por los niveles de `Grade`.
+
+```{r}
+data_clean %>%
+  pivot_longer(cols = c(pH, Temprature, Taste, Odor, Fat, Turbidity), 
+               names_to = "Variable", values_to = "Valor") %>%
+  ggplot(aes(x = Valor, fill = as.factor(Grade))) +
+  geom_histogram(alpha = 0.6, position = "identity", bins = 30) +
+  facet_wrap(~ Variable, scales = "free") +
+  labs(title = "Distribución de Variables Numéricas por Grade", 
+       x = "Valor", y = "Frecuencia", fill = "Grade") +
+  theme_minimal()
+```
+
+## 3.5 Boxplots de Variables Numéricas por `Grade`
+
+Para analizar cómo se distribuyen las variables numéricas según los niveles de `Grade` (0 = low, 1 = medium, 2 = high), utilizamos gráficos de caja (**boxplots**). Estos gráficos nos permiten identificar diferencias en la mediana, la dispersión y la presencia de valores atípicos entre las categorías de calidad del producto lácteo.
+
+Los boxplots muestran la distribución de cada variable numérica (`pH`, `Temprature`, `Taste`, etc.) segmentada por los niveles de `Grade`. Esto nos ayuda a detectar patrones o anomalías en los datos.
+
+```{r}
+data_clean %>%
+  pivot_longer(
+    cols = -Grade,               
+    names_to = "Variable",       
+    values_to = "Valor"          
+  ) %>%
+  ggplot(aes(x = as.factor(Grade), y = Valor, fill = as.factor(Grade))) +
+  geom_boxplot(outlier.color = "darkorchid", outlier.size = 2) +
+  facet_wrap(~ Variable, scales = "free") +
+  labs(
+    title = "Boxplots de Variables Numéricas por Grade",
+    x = "Grade (0 = low, 1 = medium, 2 = high)",
+    y = "Valor",
+    fill = "Grade"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 3.6 Relaciones entre Variables Numéricas
+
+Para explorar las relaciones entre pares de variables numéricas, se utilizan gráficos de dispersión (**scatterplots**). Estos gráficos permiten visualizar cómo se relacionan dos variables continuas entre sí y, además, se colorean los puntos según los niveles de `Grade` (0 = low, 1 = medium, 2 = high). Esto nos ayuda a identificar patrones o tendencias que puedan existir entre las variables en función de la calidad del producto lácteo.
+
+En este caso, se analiza la relación entre `pH` y `Temperatura`, dos variables clave en el análisis de la calidad de la leche. El gráfico permite observar si existe una asociación clara entre estas variables y cómo esta relación varía en función de los niveles de calidad (`Grade`).
+
+```{r}
+ggplot(data_clean, aes(x = pH, y = Temprature, color = as.factor(Grade))) +
+  geom_point(alpha = 0.7) +
+  labs(title = "Relación entre pH y Temperatura por Grade", 
+       x = "pH", y = "Temperatura", color = "Grade") +
+  theme_minimal()
+```
+
+## 3.7 Análisis de Variables Binarias
+
+Las variables binarias (`Taste`, `Odor`, `Fat`, `Turbidity`) son características categóricas que pueden tomar valores de 0 o 1. Para analizar su relación con la variable objetivo `Grade`, se utilizan gráficos de barras apiladas. Estos gráficos muestran la proporción de cada nivel de `Grade` dentro de cada categoría de las variables binarias.
+
+Este análisis permite identificar si ciertas características binarias están asociadas con niveles específicos de calidad. Por ejemplo, puede revelar si un valor de `Taste = 1` está más frecuentemente relacionado con productos de alta calidad (`Grade = 2`) o viceversa.
+
+```{r}
+binary_vars <- c("Taste", "Odor", "Fat", "Turbidity")
+
+binary_plots <- lapply(binary_vars, function(var) {
+  ggplot(data_clean, aes_string(x = var, fill = "as.factor(Grade)")) +
+    geom_bar(position = "fill") +
+    labs(title = paste("Proporción de Grade por", var), 
+         x = var, y = "Proporción", fill = "Grade") +
+    theme_minimal()
+})
+
+wrap_plots(binary_plots, ncol = 2)
+```
+
+## 3.8 Heatmap de Correlaciones
+
+Para visualizar de manera más intuitiva las correlaciones entre las variables numéricas, se genera un **heatmap**. Este gráfico utiliza una escala de colores para representar la intensidad de las correlaciones, donde tonos más oscuros indican correlaciones más fuertes (positivas o negativas), y tonos más claros indican correlaciones débiles o inexistentes.
+
+El heatmap proporciona una visión general de las relaciones lineales entre todas las variables numéricas del dataset, incluyendo su relación con `Grade`. Esto es especialmente útil para identificar variables altamente correlacionadas que podrían ser redundantes o para detectar variables que tienen una fuerte influencia en la calidad del producto lácteo.
+
+```{r}
+cor_matrix <- cor(data_clean %>% select(where(is.numeric)))
+library(corrplot)
+corrplot(cor_matrix, method = "color", type = "upper", tl.cex = 0.8, 
+         title = "Heatmap de Correlaciones entre Variables Numéricas")
+```
+# 4. Modelado
+
+En esta sección, desarrollaremos modelos de clasificación supervisada para predecir la variable `Grade` (0 = low, 1 = medium, 2 = high) utilizando las características numéricas y binarias del conjunto de datos. Los pasos incluyen:
+
+## 4.1 División del Conjunto de Datos
+
+Primero, dividimos los datos en conjuntos de entrenamiento y prueba para evaluar el rendimiento de los modelos. Utilizamos una proporción común de 80% para entrenamiento y 20% para prueba.
+
+```{r}
+set.seed(123) # Para estratificar
+
+trainIndex <- createDataPartition(data_clean$Grade, p = 0.8, list = FALSE)
+train_data <- data_clean[trainIndex, ]
+test_data <- data_clean[-trainIndex, ]
+
+dim(train_data)
+```
+## 4.2 Escalado de Variables Numéricas
+
+Para mejorar el rendimiento de algunos modelos (como SVM o KNN), escalamos las variables numéricas. Esto asegura que todas las variables tengan la misma escala.
+
+```{r}
+preProcValues <- preProcess(train_data %>% select(where(is.numeric)), method = c("center", "scale"))
+train_data_scaled <- predict(preProcValues, train_data %>% select(where(is.numeric)))
+test_data_scaled <- predict(preProcValues, test_data %>% select(where(is.numeric)))
+
+train_data_scaled <- cbind(train_data_scaled, Grade = train_data$Grade)
+test_data_scaled <- cbind(test_data_scaled, Grade = test_data$Grade)
+```
+
+## 4.3 Entrenamiento de Modelos
+Entrenaremos varios modelos de clasificación para comparar su rendimiento. Los modelos seleccionados son:
+
+- Regresión Logística
+- Árbol de Decisión
+- Random Forest
+- K-Nearest Neighbors (KNN)
+
+### 4.3.1 Regresión Logística Multinomial
+
+La regresión logística multinomial es una extensión de la regresión logística que permite manejar más de dos clases y puesto que el output de nuestro modelo es ordinal y no binomial, necesitamos emplear este en contraparte a la regresión logística simple. Utilizaremos el paquete nnet para entrenar este modelo.
+
+```{r}
+multinom_model <- multinom(Grade ~ ., data = train_data_scaled)
+summary(multinom_model)
+```
+
+### 4.3.2 Árbol de decisión
+
+El árbol de decisión es un modelo no paramétrico que divide los datos en función de umbrales de las variables predictoras.
+
+Los valores -1.05, 0.21 y 1.47 son los valores de `Grade` (0, 1 y 2 respectivamente) normalizados.
+
+```{r}
+tree_model <- rpart(Grade ~ .,
+                   data = train_data_scaled,
+                   method = "class",
+                   control = rpart.control(minsplit = 20,
+                                         cp = 0.01,
+                                         maxdepth = 4))
+par(mar = c(5, 4, 4, 2) + 0.1)  
+par(xpd = TRUE)                
+
+rpart.plot(tree_model,
+          type = 4,
+          extra = 104,
+          box.palette = "GnBu",
+          branch.lty = 3,
+          shadow.col = "gray",
+          nn = TRUE,
+          cex = 0.8,
+          fallen.leaves = TRUE,
+          main = "Árbol de Decisión para Clasificación de Grados")
+```
+### 4.3.3 Random Forest
+
+Random Forest es un modelo basado en ensambles que combina múltiples árboles de decisión para mejorar la precisión y reducir el sobreajuste.
+
+Los valores -1.05, 0.21 y 1.47 son los valores de `Grade` (0, 1 y 2 respectivamente) normalizados.
+
+```{r}
+rf_model <- randomForest(as.factor(Grade) ~ ., data = train_data_scaled, ntree = 100, importance = TRUE)
+print(rf_model)
+```
+### 4.3.4 K-Nearest Neighbors (KNN)
+
+KNN es un modelo basado en instancias que clasifica un punto en función de sus vecinos más cercanos.
+
+```{r}
+knn_model <- knn(train = train_data_scaled %>% select(-Grade),
+                 test = test_data_scaled %>% select(-Grade),
+                 cl = train_data_scaled$Grade,
+                 k = 5)
+# Crear un vector de etiquetas reales
+true_labels <- as.factor(test_data_scaled$Grade)
+
+# Convertir las predicciones a factores para asegurar consistencia
+predictions_knn <- factor(knn_model, levels = levels(true_labels))
+
+# Calcular la matriz de confusión
+conf_matrix_knn <- confusionMatrix(predictions_knn, true_labels)
+
+# Mostrar la matriz de confusión y métricas de evaluación
+print(conf_matrix_knn)
+```

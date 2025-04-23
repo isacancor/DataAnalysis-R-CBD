@@ -44,7 +44,7 @@ data_clean <- milknew %>%
 data_clean$Grade <- as.integer(factor(data_clean$Grade, levels = c("low", "medium", "high"), ordered = TRUE)) - 1
 data_clean$Grade <- as.integer(data_clean$Grade)
 
-data_clean
+head(data_clean)
 ```
 
 # 3. Exploración de Datos
